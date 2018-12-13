@@ -1,0 +1,166 @@
+lliurex-statistics (0.5.6) trusty; urgency=medium
+
+  * Remove filter for root executable files
+  * New mac calculation process
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Mon, 12 Nov 2018 12:04:10 +0100
+
+lliurex-statistics (0.5.5) trusty; urgency=medium
+
+  * Fix striped version number
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Wed, 25 Apr 2018 10:28:08 +0200
+
+lliurex-statistics (0.5.4) trusty; urgency=medium
+
+  * Fix bugs , switch to threaded code
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Tue, 24 Apr 2018 17:54:54 +0200
+
+lliurex-statistics (0.5.3.4) trusty; urgency=medium
+
+  * Compat code for python2 & python3 instances
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Tue, 24 Apr 2018 14:24:40 +0200
+
+lliurex-statistics (0.5.3.3) trusty; urgency=medium
+
+  * Add ltsp subtype spec 
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Mon, 23 Apr 2018 18:27:51 +0200
+
+lliurex-statistics (0.5.3) trusty; urgency=medium
+
+  * Backported to python 2 again
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Tue, 06 Mar 2018 14:26:21 +0100
+
+lliurex-statistics (0.5.2.2) trusty; urgency=medium
+
+  * Fix signals bug into llx15
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Wed, 28 Feb 2018 18:45:30 +0100
+
+lliurex-statistics (0.5.2.1) trusty; urgency=medium
+
+  * Fix local executable filter
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Wed, 28 Feb 2018 17:44:09 +0100
+
+lliurex-statistics (0.5.2) trusty; urgency=medium
+
+  * Fix writing pid file
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Wed, 28 Feb 2018 11:38:05 +0100
+
+lliurex-statistics (0.5.1) trusty; urgency=medium
+
+  * Fix bugs
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Wed, 28 Feb 2018 10:21:56 +0100
+
+lliurex-statistics (0.5-1-trusty2) trusty; urgency=medium
+
+  * Fix bugs
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Mon, 26 Feb 2018 18:13:27 +0100
+
+lliurex-statistics (0.5-1-trusty1) trusty; urgency=medium
+
+  * Fix bug module signal version
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Fri, 23 Feb 2018 13:52:54 +0100
+
+lliurex-statistics (0.5-1-trusty) trusty; urgency=medium
+
+  * Port to Lliurex trusty from xenial
+  * Fix json bug 
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Fri, 16 Feb 2018 13:23:08 +0100
+
+lliurex-statistics (0.5) xenial; urgency=medium
+
+  * Ported to python3
+  * Dynamic blacklist
+  * Support to analysys platform data
+  * Increased data results sent
+  * Better error handling
+  * Syslog support with improved logging system
+  * Simplified processing without static db files
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Wed, 14 Feb 2018 17:31:54 +0100
+
+lliurex-statistics (0.4-7) trusty; urgency=medium
+
+  * Fix race condition that stops sending messages when time changes
+  * Optimize subprocessing calls
+  * Better flavour detection
+  * Added lliurex-detect as dependency for better environment detection
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Tue, 23 May 2017 10:25:15 +0200
+
+lliurex-statistics (0.4-5) trusty; urgency=medium
+
+  * Added debconf translations
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Thu, 02 Feb 2017 17:45:55 +0100
+
+lliurex-statistics (0.4-4) trusty; urgency=medium
+
+  * Change debconf question default value 
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Thu, 02 Feb 2017 12:01:51 +0100
+
+lliurex-statistics (0.4-3) trusty; urgency=medium
+
+  * Fix priority of server over local acknowledge
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Tue, 31 Jan 2017 13:28:29 +0100
+
+lliurex-statistics (0.4-2) trusty; urgency=medium
+
+  * Updated dependencies
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Fri, 27 Jan 2017 12:54:12 +0100
+
+lliurex-statistics (0.4-1) trusty; urgency=medium
+
+  * Fix proxy usage in daemon mode
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Wed, 18 Jan 2017 17:57:01 +0100
+
+lliurex-statistics (0.4) trusty; urgency=medium
+
+  * Allow proxy usage & network timeouts when sending data
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Wed, 18 Jan 2017 10:00:28 +0100
+
+lliurex-statistics (0.3-4) trusty; urgency=medium
+
+  * Fix bug in confirmator
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Thu, 12 Jan 2017 13:27:15 +0100
+
+lliurex-statistics (0.3-3) trusty; urgency=medium
+
+  * Ported xenial code to trusty
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Thu, 15 Dec 2016 12:39:13 +0100
+
+lliurex-statistics (0.1-2) trusty; urgency=medium
+
+  * Fixes & logging file in daemon mode
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Mon, 07 Nov 2016 17:30:54 +0100
+
+lliurex-statistics (0.1-1) trusty; urgency=medium
+
+  * Fix send function && update blacklist
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Mon, 07 Nov 2016 15:18:09 +0100
+
+lliurex-statistics (0.1) trusty; urgency=low
+
+  * Initial Release.from lliurex-zero-installer-analytics v 0.118-lliurex8
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Mon, 07 Nov 2016 09:42:06 +0100

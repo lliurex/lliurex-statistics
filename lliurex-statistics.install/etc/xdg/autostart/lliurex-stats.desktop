@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Encoding=UTF-8
+Name=LliureX Certificates Management
+Comment=Load some certificates into Firefox database
+Comment[qcv]=Carrega alguns certificats a la base de dades de Firefox
+Comment[es]=Carga algunos certificados en la base de datos del Firefox
+Exec=/usr/bin/confirmator
+Terminal=false
+Type=Application
+Categories=
+GenericName=
