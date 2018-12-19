@@ -1,0 +1,15 @@
+Source: lliurex-statistics
+Section: utils
+Priority: optional
+Maintainer: M.Angel Juan <m.angel.juan@gmail.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 4.1.4
+
+Package: lliurex-statistics
+Architecture: all
+Depends: ${shlibs:Depends}, ${misc:Depends}, debconf | debconf-2.0, auditd, python3, python3-daemon, python3-requests, n4d, acl, lliurex-statistics-blacklist, lliurex-base-files, lliurex-zero-installer-analytics (>= 0.126) | zero-lliurex-analytics, python3-psutil
+Replaces: lliurex-zero-installer-analytics (<< 0.126)
+Conflicts: lliurex-zero-installer-analytics (<< 0.126)
+Description: Lliurex anonymous statistics reporting agent
+ Lliurex anonymous statistics reporting agent, this daemon reads auditd files 
+ parsing and sending relevant data.

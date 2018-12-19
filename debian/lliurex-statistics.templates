@@ -1,0 +1,22 @@
+Template: lliurex-statistics/acknowledge
+Type: select
+Choices: true, false, ask
+Choices-es: si, no, preguntar
+Choices-ca: si, no, preguntar
+Default: true
+Description:
+  Do you accept send anonymous data of currently running applications to help developers improve the system
+Description-es:
+  Aceptas el envio de informacion anonima acerca de las aplicaciones en funcionamiento al equipo de desarrollo para poder mejorar el sistema
+Description-ca:
+  Permets l'enviament d'informaciò anònima de les aplicacions en funcionament a l'equip de desenvolupadors per millorar el sistema
+
+Template: lliurex-statistics/unattended
+Type: boolean
+Default: false
+Description: Can ask about acknowledge the terms of use?
+  Hide ask question if is a unnatended install
+Description-es: Se puede preguntar acerca del los terminos de uso
+  Esconde el programa de pregunta si es una instalacion desatendida
+Description-ca: Es posible preguntar per les condicions d'us
+  Amaga el programa que pregunta si es una instal·lació desatesa.

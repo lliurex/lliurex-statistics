@@ -1,0 +1,1080 @@
+#!/usr/bin/env python3
+import sys
+import os
+import re
+import signal
+import time
+import subprocess
+import requests
+import json
+try:
+    import configparser
+except:
+    import ConfigParser as configparser
+import daemon
+try:
+    from xmlrpc import client
+except:
+    import xmlrpclib as client
+import lockfile
+import logging.handlers
+from logging import config as cfg
+import ssl
+import psutil
+
+
+oldsignals = {}
+try:
+    for sig in signal.Signals:
+        try:
+            oldsignals.setdefault(sig.name, signal.getsignal(sig))
+            signal.signal(sig.value, signal.SIG_IGN)
+        except:
+            continue
+except:
+    allsignals = [s for s in dir(signal) if s[0:3] == 'SIG']
+    for sig in allsignals:
+        try:
+            oldsignals.setdefault(sig,getattr(signal,sig))
+            signal.signal(getattr(signal,sig), signal.SIG_IGN)
+        except:
+            continue
+
+#
+# START EDITABLE VARS (OVERRIDES VALUES IN CONFIGFILE)
+#
+
+# DEBUG = 1
+
+# MODE = 'PROCEDURAL'
+MODE = 'THREADED'
+
+CONFIGFILE = '/etc/lliurex-analytics/agent.cfg'
+# CONFIGFILE = 'config.txt'
+
+# OVERRIDE_SEND_PERMISSION   = 1
+
+# MIN_LOG_LEVEL = 'debug'
+
+# DAEMON_MODE = 1
+
+# FILELOCK = '/tmp/analytics'
+
+PIDFILE = '/var/run/analytics.pid'
+FILELOCK = '/var/run/analytics.pid'
+
+# PIDFILE = '/tmp/analitics.pid'
+
+# STATUSFILE = '/etc/lliurex-analytics/status'
+
+# TIMEOUT = 1
+
+#
+# END EDITABLE VARS #
+#
+
+
+if MODE == 'PROCEDURAL':
+    from multiprocessing import Process, Manager, get_logger
+    str_formatter = '(%(processName)s)'
+if MODE == 'THREADED':
+    from multiprocessing.dummy import Process, Manager
+    from multiprocessing import get_logger
+    str_formatter = '(%(threadName)s)'
+
+def get_var_value(varname, config=None, mode='string', section='Agent'):
+    value = None
+
+    if config:
+        varname = varname.lower()
+        try:
+            if mode == 'string':
+                value = config.get(section, varname)
+            elif mode == 'bool':
+                value = config.getboolean(section, varname)
+            elif mode == 'int':
+                value = config.getint(section, varname)
+            elif mode == 'float':
+                value = config.getfloat(section, varname)
+        except:
+            pass
+
+    def f(item):
+        if isinstance(item, str) or isinstance(item, bool) or isinstance(item, int) or isinstance(item, float):
+            return True
+        else:
+            return False
+
+    for x in (v for v in globals() if varname.lower() == v.lower() and f(globals()[v])):
+        value = globals()[x]
+
+    if mode == 'string':
+        return str(value)
+    elif mode == 'bool':
+        return bool(value)
+    elif mode == 'int':
+        return int(value)
+    elif mode == 'float':
+        return float(value)
+    else:
+        return value
+
+loglevel = None
+CONFIG = None
+
+def set_loglevel():
+    global loglevel,CONFIG
+    namelevel = False
+    with_debug = False
+    set_level = False
+    set_to_default = False
+
+    if get_var_value('DEBUG',config=CONFIG, mode='bool'):
+        with_debug = True
+        loglevel = get_var_value('MIN_LOG_LEVEL',config=CONFIG)
+        if loglevel:
+            namelevel = loglevel
+            set_level = True
+            set_to_default = False
+            if loglevel == 'debug' or loglevel == logging.DEBUG:
+                loglevel = logging.DEBUG
+            elif loglevel == 'critical' or loglevel == logging.CRITICAL:
+                loglevel = logging.CRITICAL
+            elif loglevel == 'error' or loglevel == logging.ERROR:
+                loglevel = logging.ERROR
+            elif loglevel == 'warning' or loglevel == logging.WARNING:
+                loglevel = logging.WARNING
+            elif loglevel == 'info' or loglevel == logging.INFO:
+                loglevel = logging.INFO
+            else:
+                loglevel = logging.DEBUG
+                set_to_default = True
+        else:
+            set_level = False
+            set_to_default = True
+            loglevel = logging.DEBUG
+    else:
+        with_debug = False
+        namelevel = 'info'
+        set_to_default = True
+        loglevel = logging.INFO
+
+    print('set_loglevel to {}, explicitly {}, debug is {}, default mode {}'.format(namelevel,set_level,with_debug,set_to_default))
+
+set_loglevel()
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+#            'format': '%(levelname)s %(module)s (%(pathname)s:%(lineno)d) ' + str_formatter  + ' %(message)s'
+            'format': '%(levelname)s %(module)s ' + str_formatter + ' %(message)s'
+        },
+    },
+    'handlers': {
+        'stdout': {
+            'class': 'logging.StreamHandler',
+            'stream': sys.stdout,
+            'formatter': 'verbose',
+        },
+        'sys-logger6': {
+            'class': 'logging.handlers.SysLogHandler',
+            'address': '/dev/log',
+            'facility': "local6",
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'analytics-logger': {
+            'handlers': ['sys-logger6', 'stdout'],
+            'level': loglevel,
+            'propagate': True,
+        },
+    }
+}
+
+
+cfg.dictConfig(LOGGING)
+log = logging.getLogger('analytics-logger')
+
+
+def print_config(config):
+    global log
+
+    try:
+        for sect in config:
+            for key in config[sect]:
+                log.debug("Config Loaded: '{}' '{}' '{}'".format(sect, key, config[sect][key]))
+    except:
+        for sect in config.sections():
+            for key in config.options(sect):
+                log.debug("Config Loaded: '{}' '{}' '{}'".format(sect, key, config.get(sect,key)))
+
+
+def init_config():
+
+    config = configparser.ConfigParser()
+    config.read(CONFIGFILE)
+
+    return config
+
+
+def init_logging(config):
+    global DEBUG, log, loglevel, mpl
+
+    mpl = get_logger()
+    mpl.setLevel(loglevel)
+    for hdl in log.handlers:
+        mpl.addHandler(hdl)
+    mpl.propagate = True
+    set_loglevel()
+    if get_var_value('DEBUG', config):
+        DEBUG = True
+        log.setLevel(loglevel)
+        print_config(config)
+
+
+def bin_to_ascii(value):
+    global log
+
+    try:
+        if isinstance(value, bytes):
+            return value.decode('utf-8')
+        else:
+            return value
+    except Exception as e:
+        log.error('Error bin_to_ascii {}'.format(e))
+        return value
+
+
+def get_llx_version():
+    global log
+    if sys.version_info[0] > 2:
+        output = bin_to_ascii(subprocess.check_output(['lliurex-version','-n']))
+    else:
+        output = bin_to_ascii(subprocess.check_output(['bash','lliurex-version','-n']))
+    full_release = output.strip()
+    release = output[0:2].strip()
+    if release == '15':
+        use = ['lliurex-detect','-f']
+        output = bin_to_ascii(subprocess.check_output(use))
+    else:
+        if sys.version_info[0] > 2:
+            use = ['lliurex-version','-f']
+        else:
+            use = ['bash','lliurex-version','-f']
+        output = bin_to_ascii(subprocess.check_output(use))
+    flavour = output.strip()
+    #log.info("Detected release:'{}' flavour:'{}'".format(release, flavour))
+    return release, flavour, full_release
+
+
+def detect_proxy():
+    global log
+
+    px = subprocess.Popen(["bash", "-c", "source /etc/profile && echo $http_proxy"], stdout=subprocess.PIPE)
+    proxy = bin_to_ascii(px.stdout.readline()).strip()
+    #log.info("Detected proxy: '{}'".format(proxy))
+    return proxy
+
+
+def valid_fd(fd):
+    try:
+        os.fstat(fd)
+        return True
+    except:
+        return False
+
+def daemonize(*args, **kwargs):
+    global glob, log, CONFIG
+
+    log.info('Running daemon mode...')
+    filelock = get_var_value('filelock', CONFIG)
+    if not filelock:
+        filelock = '/var/run/analytics.pid'
+    if os.path.isfile(filelock):
+        try:
+            os.unlink(filelock)
+        except:
+            log.error('Unable to remove old pidfile {}'.format(filelock))
+
+    preserve = []
+    for x in [log.handlers[0].socket.fileno(),get_logger().handlers[0].socket.fileno()]:
+        if valid_fd(x):
+            preserve.append(x)
+    try:
+        with daemon.DaemonContext(detach_process=True,
+                                  working_directory='/tmp',
+                                  umask=0o002,
+                                  pidfile=lockfile.FileLock(filelock),
+                                  files_preserve=preserve):
+            start(**kwargs)
+    except Exception as e:
+        log.critical("Error daemonizing {}".format(e))
+        sys.exit(1)
+
+
+def add_item(item,regexp):
+    global glob, log
+
+    log.debug('Request to add {}'.format(item))
+
+    parts_item = item.split(' ')
+
+    executable = None
+    for i in range(len(parts_item)):
+        executable = parts_item[i].strip()
+        if '/' in executable:
+            executable = executable.split('/')[-1]
+            log.debug('Trimming executable to {}'.format(executable))
+        if not re.match(regexp,executable):
+            log.debug('Skipping malformed executable {}'.format(executable))
+            executable = None
+            continue
+        if executable in glob['INTERPRETERS']:
+            log.debug('Trimming interpreter part {}'.format(executable))
+            executable = None
+            continue
+        else:
+            if executable in glob['BLACKLIST']:
+                log.debug('Skipping add due to blacklisted command {}'.format(executable))
+                return None
+            log.debug('Valid executable {}'.format(executable))
+            break
+
+    the_list = glob['LIST']
+    if executable:
+        if executable in the_list:
+            the_list[executable] = the_list[executable] + 1
+            log.debug('+++ Incrementing {} = {}'.format(executable, the_list[executable]))
+        else:
+            log.debug('*** Adding {} = 1'.format(executable, 1))
+            the_list[executable] = 1
+    glob['LIST'] = the_list
+
+def monitor():
+    global glob, log
+
+    log.info('Start monitor')
+    logfilename = get_var_value('file', glob['config'], section='Audit')
+
+    glob['BLACKLIST'] = get_var_value('blacklist', glob['config'], section='Audit')
+    glob['INTERPRETERS'] = get_var_value('interpreters', glob['config'], section='Audit')
+
+    try:
+        glob['INTERPRETERS'] = [x.strip() for x in glob['INTERPRETERS'].split(',')]
+    except Exception as e:
+        log.error('Malformed interpreters list ,{}'.format(e))
+        glob['INTERPRETERS'] = []
+        return None
+
+    try:
+        with open(glob['BLACKLIST'], 'r') as fp:
+            glob['BLACKLIST'] = [line.strip() for line in fp]
+    except Exception as e:
+        log.error('Unable to read blacklist from {} , {}'.format(glob['BLACKLIST'], e))
+        glob['BLACKLIST'] = []
+        return None
+
+    try:
+        if not (os.path.isfile(logfilename) and os.access(logfilename, os.R_OK)):
+            log.critical('File {} not readable'.format(logfilename))
+            glob['TERMINATE'] = True
+
+        fp = subprocess.Popen(['tail', '-n', '0', '-F', logfilename], stdout=subprocess.PIPE, stderr=open(os.devnull, 'w'))
+        glob['monitor_pid'] = fp.pid
+    except Exception as e:
+        log.critical('Error initializing {} read, {}'.format(logfilename, e))
+        glob['TERMINATE'] = True
+        return None
+
+    try:
+        log.info('Starting monitoring {}'.format(logfilename))
+        regexp = re.compile('^[a-zA-Z][a-zA-Z0-9_.+\-]+$')
+        while not glob['TERMINATE']:
+            if fp.poll() is not None:
+                log.error('Dead subprocess monitoring {}'.format(logfilename))
+                fp = subprocess.Popen(['tail', '-F', logfilename], stdout=subprocess.PIPE, stderr=open(os.devnull, 'w'))
+                glob['monitor_pid'] = fp.pid
+            else:
+                line = bin_to_ascii(fp.stdout.readline()).strip()
+                if re.search('type=EXECVE', line):
+                    m = re.findall('a[0-9]+="([^"]+)"', line)
+                    if m:
+                        captured = ' '.join(m)
+                        add_item(captured,regexp)
+
+    except Exception as e:
+        try:
+            if isinstance(e, ConnectionResetError):
+                log.info('Connection reset exitting monitor thread')
+                glob['TERMINATE'] = True
+                return
+            else:
+                log.error('Error reading file {}, {}'.format(logfilename, e))
+                glob['TERMINATE'] = True
+                return
+        except:
+            if e.errno == 32:
+                log.info('Connection reset exitting monitor thread')
+                glob['TERMINATE'] = True
+                return
+            else:
+                log.error('Error reading file {}, {}'.format(logfilename, e))
+                glob['TERMINATE'] = True
+                return
+
+    log.info('Exitting monitor thread')
+    return
+
+def update_list():
+    global glob, log
+
+    log.info('Start update list')
+    retry = 3
+    done = False
+    while retry > 0:
+        try:
+            list_path = get_var_value('list_path', glob['config'], mode='string', section='Server')
+            server = get_var_value('server', glob['config'], mode='string', section='Server')
+            url = 'http://' + server + '/' + list_path
+            agent = glob['user_agent']
+            headers = {'user-agent': agent}
+            retry = 0
+            done = True
+        except Exception as e:
+            retry -= 1
+            done = e
+
+    if done != True :
+        log.error('Error gettting update list settings {}'.format(done))
+
+    log.debug('List path {}'.format(url))
+
+    tick = 1
+    timeout = 60 * 60 * 12
+    c = 10
+
+    while not glob['TERMINATE']:
+        time.sleep(tick)
+        if c > 0:
+            c = c - tick
+        else:
+            c = timeout
+
+            sent = False
+            rq = None
+
+            try:
+                if glob['use_proxy']:
+                    proxy_obj = dict()
+                    proxy_obj.setdefault('http', glob['proxy'])
+
+                    rq = requests.get(url, headers=headers, proxies=proxy_obj, timeout=5)
+                    sent = True
+                else:
+                    rq = requests.get(url, headers=headers, timeout=5)
+                    sent = True
+            except Exception as e:
+                log.warning('Error getting list from {}, {}'.format(url,e))
+
+            try:
+                blist = glob['BLACKLIST']
+            except Exception as e:
+                log.error('Error loading current blacklist on update_list, {}'.format(e))
+
+            try:
+                the_list = glob['LIST']
+            except Exception as e:
+                log.error('Error loading current applist on update_list, {}'.format(e))
+
+            if sent and rq:
+                result = rq.text
+                try:
+                    json_list = json.loads(result)
+                except Exception as e:
+                    log.warning('Wrong list received {}, {}'.format(result,e))
+                    continue
+
+                try:
+                    for item in json_list:
+                        if item not in blist:
+                            blist.append(item)
+                            log.info("Received item list '{}'".format(item))
+                        if item in the_list:
+                            del the_list[item]
+                            log.info("Removed item from list '{}'".format(item))
+                    glob['BLACKLIST'] = blist
+                    glob['LIST'] = the_list
+                except Exception as e:
+                    log.error('Error updating blacklist, {}'.format(e))
+            else:
+                log.warning('Unable to get list data')
+
+    log.info('Exitting update list thread')
+
+
+def timed_send():
+    global glob, log
+    log.debug('Start timed_send ')
+    try:
+        count = get_var_value('timeout', glob['config'], mode='int')
+        if count < 0:
+            log.warning('Not valid timeout value setting default 300')
+    except Exception as e:
+        log.warning('Unable to read timeout value defaulting to 300, {}'.format(e))
+        count = 300
+
+    log.info('Initialized timed send with value {} seconds'.format(count))
+    c = count
+    tick = 0.2
+    try:
+        while not glob['TERMINATE']:
+            while glob['PRINTING'] == True:
+                time.sleep(1)
+            time.sleep(tick)
+            if c > 0:
+                c = c - tick
+            else:
+                c = count
+                log.debug('Triggering timed send')
+                clean_and_send()
+
+    except Exception as e:
+        try:
+            if isinstance(e, ConnectionResetError):
+                log.info('Connection reset exitting timer thread')
+            else:
+                log.error('Error with timed send, {}'.format(e))
+        except:
+            if e.errno == 32:
+                log.info('Connection reset exitting timer thread')
+            else:
+                log.error('Error with timed send, {}'.format(e))
+
+    log.info('Exitting timer thread')
+    return
+
+
+def start(daemon_mode=False,release='Unknown',flavour='Unknown',proxy=False, **kwargs):
+    global THREADS, oldsignals, log, CONFIG, glob, mgr
+
+    log.info("Starting analytics")
+    log.info('Initialization with release={} flavour={} proxy={}'.format(release,flavour,proxy))
+
+    mgr = Manager()
+    glob = mgr.dict()
+
+    glob['DAEMON_MODE'] = daemon_mode
+    glob['config'] = CONFIG
+
+    glob['release'] = release
+    glob['flavour'] = flavour
+    if proxy:
+        glob['proxy'] = proxy
+        glob['use_proxy'] = True
+    else:
+        glob['proxy'] = False
+        glob['use_proxy'] = False
+
+    pidfile = get_var_value('pidfile', glob['config'])
+
+    try:
+        server = get_var_value('server', glob['config'], section='Server')
+        server_path = get_var_value('server-path', glob['config'], section='Server')
+        if server.strip() == '' or server_path.strip() == '':
+            raise Exception('Empty server or server-path')
+        glob['server'] = server
+        glob['server_path'] = server_path
+    except Exception as e:
+        log.critical('Error getting server url, {}'.format(e))
+
+    try:
+        agent = get_var_value('user-agent', glob['config'])
+        if agent.strip() == '' or agent == 'None':
+            agent = 'lliurex-analytics-agent'
+        glob['user_agent'] = agent
+    except Exception as e:
+        log.warning('Error getting user-agent, {}'.format(e))
+
+        # write pid
+    try:
+        with open(pidfile, 'w') as fp:
+            fp.write(str(os.getpid()))
+    except Exception as e:
+        log.error('Error writting pidfile {}'.format(e))
+
+    glob['TERMINATE'] = False
+    glob['PRINTING'] = False
+    glob['LIST'] = {}
+
+    glob['platform_data'] = get_platform_data()
+
+    signals = {'SIGTERM': interrupt, 'SIGINT': interrupt, 'SIGUSR1': clean_and_send, 'SIGUSR2': show_captured}
+    for sig in oldsignals:
+        if sig in signals:
+            signal.signal(signal.__dict__[sig], signals[sig])
+        else:
+            try:
+                signal.signal(signal.__dict__[sig], oldsignals[sig])
+            except:
+                continue
+
+    THREADS = dict()
+    THREADS['monitor'] = Process(target=monitor, name='monitor')
+    THREADS['monitor'].daemon = glob['DAEMON_MODE']
+
+    THREADS['timed_send'] = Process(target=timed_send, name='timed_send')
+    THREADS['timed_send'].daemon = glob['DAEMON_MODE']
+
+    THREADS['update_list'] = Process(target=update_list, name='update_list')
+    THREADS['update_list'].daemon = glob['DAEMON_MODE']
+
+    THREADS['monitor'].start()
+    THREADS['timed_send'].start()
+    THREADS['update_list'].start()
+
+
+def clean_and_send(*args, **kwargs):
+    global glob, log
+
+    override_send_permission = get_var_value('override_send_permission', glob['config'], mode='bool')
+
+    if allow_send() or override_send_permission:
+        send_data(glob['LIST'])
+    else:
+        log.info('Sending not allowed when try to send results')
+    glob['LIST'] = {}
+
+
+def get_mac():
+    global log
+
+    default_mac = '00:00:00:00:00:00'
+    dirmac = '/sys/class/net'
+    eth = None
+    filemac = 'address'
+    uid = None
+    eths = sorted(os.listdir(dirmac))
+
+    def remove_mac(mac):
+        try:
+            eths.remove(mac)
+        except:
+            pass
+
+    remove_mac('lo')
+    while len(eths):
+        eth = eths[0]
+        f = '{}/{}/{}'.format(dirmac, eth, filemac)
+        try:
+            with open(f, 'r') as fp:
+                uid = str(bin_to_ascii(fp.read()).strip())
+                if uid == default_mac:
+                    raise Exception('Zero MAC')
+                else:
+                    break
+        except Exception as e:
+            log.warning('Exception {} on {}'.format(e,eth))
+            remove_mac(eths[0])
+
+    if not uid:
+        log.error('Unable to read mac address, {}'.format(e))
+        uid = default_mac
+
+    return uid
+
+def get_cpu():
+    global log
+
+    file = '/proc/cpuinfo'
+    cpu = {}
+    try:
+        with open(file, 'r') as fp:
+            for line in fp:
+                if re.search('^processor\s+:\s+([0-9]+)$', line):
+                    m = re.findall('^processor\s+:\s+([0-9]+)', line)
+                    if m and len(m) > 0:
+                        cpu['ncpus'] = int(m[0]) + 1
+                if re.search('^model name\s+:\s+(.+)$', line):
+                    m = re.findall('^model name\s+:\s+(.+)$', line)
+                    if m and len(m) > 0:
+                        cpu['model'] = str(m[0])
+    except Exception as e:
+        log.warning('Unable to read cpuinfo, {}'.format(e))
+        cpu = None
+    return cpu
+
+
+def get_mem():
+    global log
+
+    file = '/proc/meminfo'
+    mem = None
+
+    try:
+        with open(file, 'r') as fp:
+            for line in fp:
+                if re.search('^MemTotal:\s+([0-9]+)\s+\S+$', line):
+                    m = re.findall('^MemTotal:\s+([0-9]+)\s+\S+$', line)
+                    if m and len(m) > 0:
+                        mem = int(m[0])
+                        break
+    except Exception as e:
+        log.warning('Unable to read meminfo, {}'.format(e))
+        mem = None
+    return str(mem)
+
+
+def get_vga():
+    global log
+
+    vga = None
+    try:
+        out = bin_to_ascii(subprocess.check_output(['lspci'])).split('\n')
+        for line in out:
+            line_strip = line.strip()
+            if re.search('VGA', line_strip, re.IGNORECASE):
+                m = re.findall('^\S+\s(.+)$', line_strip)
+                if m and len(m) > 0:
+                    vga = m[0]
+                    break
+    except Exception as e:
+        log.warning('Unable to read pciinfo, {}'.format(e))
+        vga = None
+    return str(vga)
+
+
+def get_arch():
+    global log
+
+    arch = None
+    try:
+        arch = bin_to_ascii(subprocess.check_output(['uname', '-m'])).strip()
+    except Exception as e:
+        log.warning('Unable to read architecture, {}'.format(e))
+        arch = None
+    return str(arch)
+
+def get_subtype():
+    global log
+
+    subtype = { 'LTSP': None , 'MODE': None}
+    try:
+        rel,fla,full_rel = get_llx_version()
+        if rel == '15':
+            outtype = bin_to_ascii(subprocess.check_output(['lliurex-detect -a -e'],shell=True)).strip()
+        else:
+            outtype = bin_to_ascii(subprocess.check_output(['lliurex-version -a -e'],shell=True)).strip()
+        outtype = outtype.split('\n')
+        ltsp = None
+        mode = None
+        for line in outtype:
+            if re.search('FAT=yes', line, re.IGNORECASE):
+                mode = 'FAT'
+            elif re.search('THIN=yes', line, re.IGNORECASE):
+                mode = 'THIN'
+            elif re.search('SEMI=yes', line, re.IGNORECASE):
+                mode = 'SEMI'
+            elif re.search('LTSP=yes', line, re.IGNORECASE):
+                ltsp = True
+        subtype['LTSP'] = ltsp
+        subtype['MODE'] = mode
+    except Exception as e:
+        return subtype
+    return subtype
+
+
+def get_platform_data():
+    global log
+
+    data = {}
+    data.setdefault('mac', get_mac())
+    data.setdefault('cpu', get_cpu())
+    data.setdefault('mem', get_mem())
+    data.setdefault('vga', get_vga())
+    data.setdefault('arch', get_arch())
+    data.setdefault('subtype', get_subtype())
+
+    log.debug("Detected mac='{}' arch='{}' cpu='{}' mem='{}' vga='{}' subtype='{}'".format(data['mac'], data['arch'], data['cpu'], data['mem'], data['vga'], data['subtype']))
+    return data
+
+
+def send_data(data):
+    global log, glob
+
+    log.debug('sending specs {}'.format(glob['platform_data']))
+    log.debug('sending data {}'.format(glob['LIST']))
+
+    agent = glob['user_agent']
+    url = 'http://' + glob['server'] + '/' + glob['server_path']
+    headers = {'user-agent': agent}
+
+    version = glob['release']
+    flavour = glob['flavour']
+
+    list_data = data
+    try:
+        json_list_data = json.dumps(list_data)
+    except Exception as e:
+        log.error('Json error on internal data list')
+        return None
+
+    platform_data = glob['platform_data']
+    uid = platform_data['mac']
+
+    data_to_send = dict()
+    data_to_send.setdefault('uid', uid)
+    data_to_send.setdefault('vers', version)
+    data_to_send.setdefault('sab', flavour)
+    data_to_send.setdefault('specs', platform_data)
+    data_to_send.setdefault('stats', json_list_data)
+
+    try:
+        json_data_to_send = json.dumps(data_to_send)
+    except Exception as e:
+        log.error('Json error on data to send')
+        return None
+
+    payload = {'stats': json_data_to_send}
+    log.debug('Payload to send: {}'.format(payload))
+
+    sent = False
+    rq = None
+    if glob['use_proxy']:
+        proxy_obj = dict()
+        proxy_obj.setdefault('http', glob['proxy'])
+        try:
+            rq = requests.post(url, data=payload, headers=headers, proxies=proxy_obj, timeout=5)
+            sent = True
+        except Exception as e:
+            log.error('Error sending data through proxy, {}'.format(e))
+
+    if not glob['use_proxy'] or sent == False:
+        try:
+            rq = requests.post(url, data=payload, headers=headers, timeout=5)
+            sent = True
+        except Exception as e:
+            log.error('Error sending data, {}'.format(e))
+
+    if sent and rq:
+        result = rq.text
+        result = result.strip().lower()
+        if result == 'ok':
+            log.debug('Sending was success with reply OK ')
+        elif result == 'nok':
+            log.info('Sending was success but reply is NOK ')
+        else:
+            log.warning("Sending was success but reply is unknown '{}'".format(result))
+    else:
+        log.warning('Unable to send data')
+
+
+def interrupt(*args, **kwargs):
+    global glob, log, THREADS, mgr
+
+    log.info('Interrupting analytics')
+    try:
+        clean_and_send()
+        try:
+            glob['TERMINATE'] = True
+            os.kill(glob['monitor_pid'],signal.SIGKILL)
+        except Exception as e:
+            log.error('Requested kill the program {}'.format(e))
+            sys.exit(1)
+        for x in THREADS:
+            THREADS[x].join(1)
+            log.info('Interrupt: Joined {}'.format(x))
+
+    except Exception as e:
+        log.error('Error while interrupting, {}'.format(e))
+
+
+def show_captured(*args, **kwargs):
+    global glob, log
+
+    glob['PRINTING'] = True
+    log.info('Requested to show list')
+
+    list_items = glob['LIST']
+    if not isinstance(list_items, dict):
+        log.warning('Error showing captured items, LIST is not a dictionary')
+
+    listkeys_sorted = sorted(list_items, key=list_items.get, reverse=True)
+
+    if len(listkeys_sorted) > 0:
+        log.info('analytics is showing currently capture list in memory')
+        for i in listkeys_sorted:
+            log.info('{} = {}'.format(i, list_items.get(i)))
+    else:
+        log.info('analytics detect an empty capture list in memory')
+
+    glob['PRINTING'] = False
+
+
+def check_server_acknowledge():
+    global log
+
+    try:
+        c = client.ServerProxy("https://server:9779/",
+                               verbose=False,
+                               use_datetime=True,
+                               context=ssl._create_unverified_context())
+        return c.get_variable("", "VariablesManager", "STATS_ENABLED")
+    except Exception as e:
+        log.error('Error getting variables, {}'.format(e))
+        return None
+
+
+def check_local_acknowledge():
+    global glob, log
+
+    if glob['TERMINATE']:
+        return None
+
+    try:
+        statusfile = get_var_value('statusfile', glob['config'])
+        if str(statusfile) == 'None':
+            statusfile = '/etc/lliurex-analytics/status'
+            log.warning('Warning statusfile not set, defaulting to {}'.format(statusfile))
+    except Exception as e:
+        log.error('Error getting value for statusfile, {}'.format(e))
+
+    answer = None
+    try:
+
+        if os.path.isfile(statusfile):
+            fp = open(statusfile, 'r')
+            answer = fp.readline()
+            fp.close()
+        else:
+            log.error('wrong statusfile {}'.format(statusfile))
+            return None
+
+        return answer.strip()
+    except Exception as e:
+        log.warning('Error reading status file, {}'.format(e))
+        return None
+
+
+def allow_send():
+    global glob, log
+
+    if glob['TERMINATE']:
+        return False
+
+    if glob['flavour'].lower() == 'server':
+        answer = str(check_server_acknowledge())
+        answer = answer.strip()
+        if answer == '1':
+            log.info('Allowed to send stats checking server acknowledge')
+            return True
+        elif answer == '0':
+            log.info('Denied to send stats checking server acknowledge')
+            return False
+        elif answer == 'None':
+            pass
+        else:
+            log.info('Unknown value checking server acknowledge, {}'.format(answer))
+    answer = str(check_local_acknowledge()).lower()
+    answer = answer.strip()
+    if answer == 'yes':
+        log.info('Allowed to send stats checking local acknowledge')
+        return True
+    elif answer == 'no':
+        log.info('Denied to send stats checking local acknowledge')
+        return False
+    elif answer == '':
+        pass
+    else:
+        log.info('Unknown value checking local acknowledge, {}'.format(answer))
+
+    log.info('Denied to send stats by default')
+    return False
+
+
+if __name__ == '__main__':
+    exit = 0
+    keyword='analytics'
+    if sys.version[0] == '3':
+        interpreter='python3'
+    else:
+        interpreter='python'
+    for proc in psutil.process_iter():
+        a=False
+        b=False
+        cmd=None
+        try:
+            cmd = proc.cmdline()
+        except:
+            cmd = proc.cmdline
+        for argument in cmd:
+            #print('{} {} {}'.format(cmd,keyword,argument[-len(keyword):]))
+            if interpreter in argument[-len(interpreter):]:
+                a = True
+            if keyword in argument[-len(keyword):]:
+                b = True
+            if a and b:
+                exit = exit +1
+    if exit > 1:
+        log.error('Another daemon is running')
+        sys.exit(1)
+
+    try:
+        log.info('Initializing config')
+        CONFIG = init_config()
+    except Exception as e:
+        log.error('Error initializing config analytics {}'.format(e))
+        sys.exit(1)
+    try:
+        log.info('Initializing final logging')
+        init_logging(CONFIG)
+    except Exception as e:
+        log.error('Error initializing logging analytics {}'.format(e))
+        sys.exit(1)
+
+    THREADS = {}
+
+    try:
+        release, flavour, full_release = get_llx_version()
+    except Exception as e:
+        log.error('Error getting llx version {}'.format(e))
+        release = 'Unknown'
+        flavour = 'Unknown'
+        full_release = 'Unknown'
+
+    proxy = ''
+    try:
+        proxy = detect_proxy()
+        if proxy == '':
+            #log.info('Not using proxy')
+            proxy = False
+    except Exception as e:
+        log.warning('Error detecting proxy {}'.format(e))
+        proxy = False
+
+    DAEMON_MODE = get_var_value('DAEMON_MODE', CONFIG, 'bool')
+
+    if DAEMON_MODE:
+        daemonize(daemon_mode=True,flavour=flavour,release=full_release,proxy=proxy)
+    else:
+        start(daemon_mode=False,flavour=flavour,release=full_release,proxy=proxy)
+
+    log.debug('End main')
+    ended = False
+    while not ended:
+        ended = True
+        for t in THREADS:
+            THREADS[t].join(1)
+            if THREADS[t].exitcode == None:
+                ended = False
+            else:
+                log.info('Joined {}'.format(t))
+    try:
+        mgr.shutdown()
+    except:
+        pass
+
+    log.info('Exitting analytics')
+    sys.exit(0)
