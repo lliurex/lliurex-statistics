@@ -29,10 +29,14 @@ case "$1" in
                 mv /var/log/analytics /var/log/tmp_analytics_old || true
             fi
             if [ -f /etc/audit/auditd.conf ]; then 
-	        dpkg-divert --package lliurex-statistics --divert /etc/audit/auditd.conf.auditd-orig --rename /etc/audit/auditd.conf
-	        [ \! -e /etc/audit/auditd.conf -o -L /etc/audit/auditd.conf ] && ln -f /etc/audit/auditd.analytics /etc/audit/auditd.conf
-	    fi
-	    
+                dpkg-divert --package lliurex-statistics --divert /etc/audit/auditd.conf.auditd-orig --rename /etc/audit/auditd.conf
+                [ \! -e /etc/audit/auditd.conf -o -L /etc/audit/auditd.conf ] && ln -f /etc/audit/auditd.analytics /etc/audit/auditd.conf
+            fi
+	    if [ -f /etc/audisp/plugins.d/af_unix.conf ]; then 
+                dpkg-divert --package lliurex-statistics --divert /etc/audisp/plugins.d/af_unix.conf.auditd-orig --rename /etc/audisp/plugins.d/af_unix.conf
+                [ \! -e /etc/audisp/plugins.d/af_unix.conf -o -L /etc/audisp/plugins.d/af_unix.conf ] && ln -f /etc/audisp/plugins.d/af_unix.analytics /etc/audisp/plugins.d/af_unix.conf
+            fi
+
 	    if [ -f /lib/systemd/system/auditd.service ]; then
 	        sed -i.orig -e 's/#ExecStartPost=-\/sbin\/augenrules --load/ExecStartPost=-\/sbin\/augenrules --load/' /lib/systemd/system/auditd.service
 	    fi
@@ -45,8 +49,9 @@ case "$1" in
 	        [ \! -e /etc/default/auditd -o -L /etc/default/auditd ] && ln -f /etc/audit/default.analytics /etc/default/auditd
 	    fi
 	    
-	    update-rc.d auditd defaults 98
-	    update-rc.d analytics defaults 99
+	    # Systemd make useless this
+	    #update-rc.d auditd defaults 98
+	    #update-rc.d analytics defaults 99
 	    
 	    $(which echo) -e "-a exit,always -S execve\n" >> /etc/audit/rules.d/analytics.rules
 	    touch /etc/lliurex-analytics/status

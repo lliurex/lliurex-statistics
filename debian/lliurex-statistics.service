@@ -1,0 +1,16 @@
+[Unit]
+Description=Lliurex statistics collector agent
+After=network.target auditd.service
+
+[Service]
+Type=forking
+PIDFile=/var/run/analytics.pid
+ExecStartPre=/usr/lib/lliurex-statistics/init_script.sh
+ExecStart=/usr/sbin/analytics
+Restart=always
+TimeoutSec=120
+Nice=-1
+
+[Install]
+Alias=analytics.service
+WantedBy=multi-user.target

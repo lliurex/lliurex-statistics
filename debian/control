@@ -2,7 +2,7 @@ Source: lliurex-statistics
 Section: utils
 Priority: optional
 Maintainer: M.Angel Juan <m.angel.juan@gmail.com>
-Build-Depends: debhelper (>= 8.0.0)
+Build-Depends: debhelper (>= 8.0.0), dh-systemd
 Standards-Version: 4.1.4
 
 Package: lliurex-statistics
