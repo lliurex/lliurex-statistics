@@ -1,3 +1,9 @@
+lliurex-statistics (0.5.7) bionic; urgency=medium
+
+  * New audit event reader
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Thu, 20 Dec 2018 16:21:30 +0100
+
 lliurex-statistics (0.5.6) bionic; urgency=medium
 
   * Remove filter for root executable files
