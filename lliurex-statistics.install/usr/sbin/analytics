@@ -21,6 +21,7 @@ import logging.handlers
 from logging import config as cfg
 import ssl
 import psutil
+import socket
 
 
 oldsignals = {}
@@ -69,6 +70,11 @@ FILELOCK = '/var/run/analytics.pid'
 
 # TIMEOUT = 1
 
+SOCK_MAX_LENGTH = 4096
+
+timeout_method = True
+if not timeout_method:
+    import select
 #
 # END EDITABLE VARS #
 #
@@ -357,7 +363,11 @@ def monitor():
     global glob, log
 
     log.info('Start monitor')
-    logfilename = get_var_value('file', glob['config'], section='Audit')
+    use_audit_sock = get_var_value('use_audit_sock', glob['config'], section='Audit')
+    sock_file = get_var_value('sock', glob['config'], section='Audit')
+
+    if not use_audit_sock:
+        logfilename = get_var_value('file', glob['config'], section='Audit')
 
     glob['BLACKLIST'] = get_var_value('blacklist', glob['config'], section='Audit')
     glob['INTERPRETERS'] = get_var_value('interpreters', glob['config'], section='Audit')
@@ -377,53 +387,153 @@ def monitor():
         glob['BLACKLIST'] = []
         return None
 
-    try:
-        if not (os.path.isfile(logfilename) and os.access(logfilename, os.R_OK)):
-            log.critical('File {} not readable'.format(logfilename))
-            glob['TERMINATE'] = True
+    if use_audit_sock:
+        def data2dic(data):
+            stripchars = ' "'
+            try:
+                return { k.strip(stripchars):v.strip(stripchars) for k,v in (x.split('=',1) for x in data.split()) }
+            except:
+                return None
 
-        fp = subprocess.Popen(['tail', '-n', '0', '-F', logfilename], stdout=subprocess.PIPE, stderr=open(os.devnull, 'w'))
-        glob['monitor_pid'] = fp.pid
-    except Exception as e:
-        log.critical('Error initializing {} read, {}'.format(logfilename, e))
-        glob['TERMINATE'] = True
-        return None
+        def filterdic(data,regexp=re.compile('a[0-9]+'),typeline='execve'):
+            try:
+                if data.get('type','').lower() == typeline:
+                    return { k:data[k] for k in data if re.match(regexp,k) }
+                else:
+                    return None
+            except:
+                return None
 
-    try:
-        log.info('Starting monitoring {}'.format(logfilename))
-        regexp = re.compile('^[a-zA-Z][a-zA-Z0-9_.+\-]+$')
-        while not glob['TERMINATE']:
-            if fp.poll() is not None:
-                log.error('Dead subprocess monitoring {}'.format(logfilename))
-                fp = subprocess.Popen(['tail', '-F', logfilename], stdout=subprocess.PIPE, stderr=open(os.devnull, 'w'))
-                glob['monitor_pid'] = fp.pid
-            else:
-                line = bin_to_ascii(fp.stdout.readline()).strip()
-                if re.search('type=EXECVE', line):
-                    m = re.findall('a[0-9]+="([^"]+)"', line)
-                    if m:
-                        captured = ' '.join(m)
-                        add_item(captured,regexp)
+        def dic2list(data):
+            try:
+                return [ data[k] for k in sorted(data.keys()) ]
+            except Exception as e:
+                return e
 
-    except Exception as e:
+        def print_dict(data):
+            try:
+                if data:
+                    for k in data:
+                        print('{} = {}'.format(k,data.get(k)))
+                    print('\n')
+            except:
+                pass
+            finally:
+                return data
+
+        def readsock(sock):
+            global glob
+            buffer = _read_sock(sock)
+            if buffer:
+                buffer = bin_to_ascii(sock)
+            while not glob['TERMINATE']:
+                if buffer and "\n" in buffer:
+                    (line, buffer) = buffer.split("\n",1)
+                    yield line
+                else:
+                    more = _read_sock(sock)
+                    if more:
+                        if buffer:
+                            buffer += bin_to_ascii(more)
+                        else:
+                            buffer = bin_to_ascii(more)
+                    else:
+                        # if something non blocking is called, end processing
+                        #glob['TERMINATE'] = True
+                        time.sleep(0.1)
+            if buffer:
+                yield buffer
+
+        def _read_sock(sock):
+            global timeout_method
+            sock.setblocking(False)
+            try:
+                if timeout_method:
+                    sock.settimeout(1)
+                    return sock.recv(SOCK_MAX_LENGTH)
+                else:
+                    ready = select.select([sock],[],[],10)
+                    if ready:
+                        return sock.recv(SOCK_MAX_LENGTH)
+            except Exception as e:
+                #print('Exception {}'.format(e))
+                pass
+            return None
         try:
-            if isinstance(e, ConnectionResetError):
-                log.info('Connection reset exitting monitor thread')
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(sock_file)
+            log.info('Connected to socket "{}"'.format(sock_file))
+        except Exception as e:
+            log.critical('Error initializing audit socket for read: {}'.format(e))
+            glob['TERMINATE'] = True
+            return None
+        try:
+            log.info('Starting monitor')
+            glob['TERMINATE'] = False
+            filter_audit_params = re.compile(r'a[0-9]+')
+            filter_valid_executables = re.compile(r'^[a-zA-Z][a-zA-Z0-9_.+\-]+$')
+            while not glob['TERMINATE']:
+                for data in readsock(sock):
+                    filtered = filterdic(data2dic(data),regexp=filter_audit_params)
+                    if filtered:
+                        #print_dict(filtered)
+                        list_cmd=dic2list(filtered)
+                        #print('CAPTURE: {}'.format(' '.join(a)))
+                        str_cmd=' '.join(list_cmd)
+                        add_item(str_cmd,filter_valid_executables)
+        except Exception as e:
+            log.error('Error monitoring: {}'.format(e))
+            sock.close()
+            glob['TERMINATE'] = True
+            return
+    else:
+        try:
+            if not (os.path.isfile(logfilename) and os.access(logfilename, os.R_OK)):
+                log.critical('File {} not readable'.format(logfilename))
                 glob['TERMINATE'] = True
-                return
-            else:
-                log.error('Error reading file {}, {}'.format(logfilename, e))
-                glob['TERMINATE'] = True
-                return
-        except:
-            if e.errno == 32:
-                log.info('Connection reset exitting monitor thread')
-                glob['TERMINATE'] = True
-                return
-            else:
-                log.error('Error reading file {}, {}'.format(logfilename, e))
-                glob['TERMINATE'] = True
-                return
+
+            fp = subprocess.Popen(['tail', '-n', '0', '-F', logfilename], stdout=subprocess.PIPE, stderr=open(os.devnull, 'w'))
+            glob['monitor_pid'] = fp.pid
+        except Exception as e:
+            log.critical('Error initializing {} read, {}'.format(logfilename, e))
+            glob['TERMINATE'] = True
+            return None
+
+        try:
+            log.info('Starting monitoring {}'.format(logfilename))
+            regexp = re.compile('^[a-zA-Z][a-zA-Z0-9_.+\-]+$')
+            while not glob['TERMINATE']:
+                if fp.poll() is not None:
+                    log.error('Dead subprocess monitoring {}'.format(logfilename))
+                    fp = subprocess.Popen(['tail', '-F', logfilename], stdout=subprocess.PIPE, stderr=open(os.devnull, 'w'))
+                    glob['monitor_pid'] = fp.pid
+                else:
+                    line = bin_to_ascii(fp.stdout.readline()).strip()
+                    if re.search('type=EXECVE', line):
+                        m = re.findall('a[0-9]+="([^"]+)"', line)
+                        if m:
+                            captured = ' '.join(m)
+                            add_item(captured,regexp)
+
+        except Exception as e:
+            try:
+                if isinstance(e, ConnectionResetError):
+                    log.info('Connection reset exitting monitor thread')
+                    glob['TERMINATE'] = True
+                    return
+                else:
+                    log.error('Error reading file {}, {}'.format(logfilename, e))
+                    glob['TERMINATE'] = True
+                    return
+            except:
+                if e.errno == 32:
+                    log.info('Connection reset exitting monitor thread')
+                    glob['TERMINATE'] = True
+                    return
+                else:
+                    log.error('Error reading file {}, {}'.format(logfilename, e))
+                    glob['TERMINATE'] = True
+                    return
 
     log.info('Exitting monitor thread')
     return
@@ -879,7 +989,8 @@ def interrupt(*args, **kwargs):
         clean_and_send()
         try:
             glob['TERMINATE'] = True
-            os.kill(glob['monitor_pid'],signal.SIGKILL)
+            if 'monitor_pid' in glob:
+                os.kill(glob['monitor_pid'],signal.SIGKILL)
         except Exception as e:
             log.error('Requested kill the program {}'.format(e))
             sys.exit(1)
@@ -1068,6 +1179,7 @@ if __name__ == '__main__':
         for t in THREADS:
             THREADS[t].join(1)
             if THREADS[t].exitcode == None:
+                #log.debug('Thread {} still alive'.format(t))
                 ended = False
             else:
                 log.info('Joined {}'.format(t))
