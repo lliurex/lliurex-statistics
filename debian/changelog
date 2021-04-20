@@ -1,3 +1,9 @@
+lliurex-statistics (0.5.7) focal; urgency=medium
+
+  * First focal port
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Tue, 20 Apr 2021 12:04:50 +0200
+
 lliurex-statistics (0.5.7) bionic; urgency=medium
 
   * New audit event reader
