@@ -1032,7 +1032,7 @@ def check_server_acknowledge():
                                verbose=False,
                                use_datetime=True,
                                context=ssl._create_unverified_context())
-        return c.get_variable("", "VariablesManager", "STATS_ENABLED")
+        return c.get_variable("STATS_ENABLED").get('return')
     except Exception as e:
         log.error('Error getting variables, {}'.format(e))
         return None
