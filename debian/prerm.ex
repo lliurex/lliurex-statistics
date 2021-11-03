@@ -13,21 +13,12 @@ set -e
 #        * <deconfigured's-prerm> `deconfigure' `in-favour'
 #          <package-being-installed> <version> `removing'
 #          <conflicting-package> <version>
-# for details, see http://www.debian.org/doc/debian-policy/ or
+# for details, see https://www.debian.org/doc/debian-policy/ or
 # the debian-policy package
 
 
 case "$1" in
     remove|upgrade|deconfigure)
-	systemctl stop analytics
-	systemctl stop auditd
-	[ -f /etc/audit/auditd.conf ] && rm /etc/audit/auditd.conf
-        dpkg-divert --package lliurex-statistics --rename --remove /etc/audit/auditd.conf
-	[ -f /etc/audisp/plugins.d/af_unix.conf ] && rm /etc/audisp/plugins.d/af_unix.conf
-        dpkg-divert --package lliurex-statistics --rename --remove /etc/audisp/plugins.d/af_unix.conf
-	[ -f /etc/default/auditd ] && rm /etc/default/auditd
-	dpkg-divert --package lliurex-statistics --rename --remove /etc/default/auditd
-	rm -f /etc/audit/rules.d/analytics.rules /etc/lliurex-analytics/status
     ;;
 
     failed-upgrade)

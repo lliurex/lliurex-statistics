@@ -15,19 +15,12 @@ set -e
 #        * <new-postrm> `abort-upgrade' <old-version>
 #        * <disappearer's-postrm> `disappear' <overwriter>
 #          <overwriter-version>
-# for details, see http://www.debian.org/doc/debian-policy/ or
+# for details, see https://www.debian.org/doc/debian-policy/ or
 # the debian-policy package
 
 
 case "$1" in
     purge|remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
-    
-    if [ "$1" = "purge" -a -e /usr/share/debconf/confmodule ]; then
-        # Source debconf library.
-        . /usr/share/debconf/confmodule
-        # Remove my changes to the db.
-        db_purge
-    fi
     ;;
 
     *)
