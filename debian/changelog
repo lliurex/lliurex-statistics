@@ -1,3 +1,9 @@
+lliurex-statistics (0.6.1) bionic; urgency=medium
+
+  * Fix possible errors when update chrooted environments
+
+ -- M.Angel Juan <m.angel.juan@gmail.com>  Tue, 14 Dec 2021 12:28:17 +0100
+
 lliurex-statistics (0.6) bionic; urgency=medium
 
   * Dummy package disabling lliurex-statistics

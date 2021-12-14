@@ -22,6 +22,15 @@ case "$1" in
     ;;
 
     failed-upgrade)
+        systemctl stop analytics || true
+        systemctl stop auditd || true
+        [ -f /etc/audit/auditd.conf ] && rm /etc/audit/auditd.conf
+        dpkg-divert --package lliurex-statistics --rename --remove /etc/audit/auditd.conf
+        [ -f /etc/audisp/plugins.d/af_unix.conf ] && rm /etc/audisp/plugins.d/af_unix.conf
+        dpkg-divert --package lliurex-statistics --rename --remove /etc/audisp/plugins.d/af_unix.conf
+        [ -f /etc/default/auditd ] && rm /etc/default/auditd
+        dpkg-divert --package lliurex-statistics --rename --remove /etc/default/auditd
+        rm -f /etc/audit/rules.d/analytics.rules /etc/lliurex-analytics/status || true
     ;;
 
     *)
